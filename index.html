@@ -7,11 +7,17 @@
 <header><div class="brand">◉ RECALL RADAR</div><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Official NHTSA checker</a></header>
 <main><h1>Know your vehicle.<br>Know the recalls.</h1><p>Enter a VIN to identify your vehicle and explore model-level safety recall campaigns reported by the U.S. government. Free, no account required.</p>
 <section class="panel"><form id="form"><label for="vin">17-character vehicle identification number</label><input id="vin" minlength="17" maxlength="17" required autocomplete="off" spellcheck="false" placeholder="Enter VIN"><button id="go">Search recalls</button></form><p class="small">VINs are submitted directly from your browser to NHTSA's VIN decoder. This site does not operate a VIN database.</p><p id="status" role="status" aria-live="polite"></p></section>
-<section class="panel"><h2>My Garage</h2><p class="small">Saved VINs stay only in this browser. Anyone with access to this device may view them. Clear browser data to remove them.</p><button type="button" id="save" disabled>Save current vehicle</button><div id="garage"></div></section><section class="panel" id="results" hidden><h2 id="vehicle"></h2><p id="summary"></p><div id="list"></div><p><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Check VIN-specific open recall status on NHTSA.gov</a></p><p class="small">Model-level recall campaigns do not establish that your individual VIN has an open recall. Check VIN-specific status with NHTSA or the manufacturer.</p></section></main>
+<section class="panel"><h2>My Garage</h2><p class="small">Saved VINs stay only in this browser. Anyone with access to this device may view them. Clear browser data to remove them.</p><button type="button" id="save" disabled>Save current vehicle</button><div id="garage"></div><button type="button" id="check-all">Check all saved vehicles</button><p id="garage-status" role="status" aria-live="polite" class="small"></p><p class="small">On return, this browser checks saved vehicles for newly listed model-level campaigns. This is not a background notification service or VIN-specific recall determination. Checks require internet access and this browser’s saved data.</p></section><section class="panel" id="results" hidden><h2 id="vehicle"></h2><p id="summary"></p><div id="list"></div><p><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Check VIN-specific open recall status on NHTSA.gov</a></p><p class="small">Model-level recall campaigns do not establish that your individual VIN has an open recall. Check VIN-specific status with NHTSA or the manufacturer.</p></section></main>
 <footer>Independent educational website, not affiliated with NHTSA. Data: <a href="https://www.nhtsa.gov/nhtsa-datasets-and-apis">NHTSA APIs</a>. Always verify safety information with official sources.</footer>
 <script>
 const $=s=>document.querySelector(s);
+const line=(tag,text)=>{const e=document.createElement(tag);e.textContent=text||'';return e};
 const garageKey='recall-radar-garage-v1';
+const snapshotKey='recall-radar-snapshots-v1';
+let snapshots={};try{snapshots=JSON.parse(localStorage.getItem(snapshotKey)||'{}')||{}}catch{snapshots={}}
+function campaignIds(rows){return [...new Set(rows.map(x=>String(x.NHTSACampaignNumber||'').trim()).filter(Boolean))].sort()}
+function updateSnapshot(vin,rows){const ids=campaignIds(rows),old=snapshots[vin];const added=old&&Array.isArray(old.ids)?ids.filter(id=>!old.ids.includes(id)):[];snapshots[vin]={ids,checked:new Date().toISOString(),newIds:added};try{localStorage.setItem(snapshotKey,JSON.stringify(snapshots))}catch{}return {added,first:!old}}
+
 let currentVehicle=null;
 function readGarage(){try{const x=JSON.parse(localStorage.getItem(garageKey)||'[]');return Array.isArray(x)?x.filter(v=>typeof v.vin==='string'&&/^[A-HJ-NPR-Z0-9]{17}$/.test(v.vin)).slice(0,20):[]}catch{return []}}
 function renderGarage(){
@@ -23,7 +29,8 @@ function renderGarage(){
  row.append(line('strong',v.label+' — '+v.vin.slice(0,3)+'••••••••'+v.vin.slice(-6)));
  const check=line('button','Check');check.type='button';check.style.marginRight='8px';
  check.addEventListener('click',()=>{$('#vin').value=v.vin;$('#form').requestSubmit()});
- const remove=line('button','Remove');remove.type='button';remove.addEventListener('click',()=>{localStorage.setItem(garageKey,JSON.stringify(readGarage().filter(x=>x.vin!==v.vin)));renderGarage()});
+ const remove=line('button','Remove');remove.type='button';remove.addEventListener('click',()=>{localStorage.setItem(garageKey,JSON.stringify(readGarage().filter(x=>x.vin!==v.vin)));delete snapshots[v.vin];localStorage.setItem(snapshotKey,JSON.stringify(snapshots));renderGarage()});
+ const snap=snapshots[v.vin];if(snap){row.append(line('p',snap.newIds?.length?'New campaigns since last check: '+snap.newIds.length:'Last checked: '+new Date(snap.checked).toLocaleString()));}
  row.append(line('div'));row.lastChild.append(check,remove);el.append(row);
  })
 }
@@ -33,7 +40,9 @@ $('#save').addEventListener('click',()=>{
  renderGarage();
 });
 renderGarage();
-const line=(tag,text)=>{const e=document.createElement(tag);e.textContent=text||'';return e};
+async function checkGarage(){const saved=readGarage();if(!saved.length)return;const btn=$('#check-all');btn.disabled=true;$('#garage-status').textContent='Checking saved vehicles…';let ok=0,failed=0,newCount=0;for(const v of saved){try{const d=await get('https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/'+encodeURIComponent(v.vin)+'?format=json');const x=d.Results?.[0];if(!x?.Make||!x?.Model||!/^\\d{4}$/.test(x.ModelYear))throw Error('Decode failed');const r=await get('https://api.nhtsa.gov/recalls/recallsByVehicle?make='+encodeURIComponent(x.Make)+'&model='+encodeURIComponent(x.Model)+'&modelYear='+encodeURIComponent(x.ModelYear));const result=updateSnapshot(v.vin,Array.isArray(r.results)?r.results:[]);newCount+=result.added.length;ok++}catch{failed++}}renderGarage();$('#garage-status').textContent=ok+' checked; '+newCount+' newly listed campaign(s) compared with previous checks.'+(failed?' '+failed+' failed; retry later.':'')+' These are model-level campaigns, not VIN-specific open recall alerts.';btn.disabled=false}
+$('#check-all').addEventListener('click',checkGarage);
+if(readGarage().length)checkGarage();
 async function get(url){const r=await fetch(url);if(!r.ok)throw Error('Government data service unavailable ('+r.status+')');return r.json()}
 $('#form').addEventListener('submit',async e=>{
 e.preventDefault();$('#results').hidden=true;$('#status').className='';currentVehicle=null;$('#save').disabled=true;
@@ -48,10 +57,11 @@ $('#vehicle').textContent=v.ModelYear+' '+v.Make+' '+v.Model;currentVehicle={vin
 $('#status').textContent='Checking recall campaigns…';
 const r=await get('https://api.nhtsa.gov/recalls/recallsByVehicle?make='+encodeURIComponent(v.Make)+'&model='+encodeURIComponent(v.Model)+'&modelYear='+encodeURIComponent(v.ModelYear));
 const rows=Array.isArray(r.results)?r.results:[];
+if(readGarage().some(x=>x.vin===vin)){const result=updateSnapshot(vin,rows);renderGarage();if(result.added.length)$('#status').textContent='Newly listed campaigns since your last check: '+result.added.join(', ')}
 $('#summary').textContent=rows.length?rows.length+' model-level recall campaign record(s) found. These are NOT confirmed open recalls for this VIN.':'No model-level campaigns returned. This does not prove the vehicle has no recalls.';
 $('#list').replaceChildren();
 rows.forEach(x=>{const a=line('article');a.className='recall';a.append(line('h3',x.Component||'Recall campaign'),line('p','NHTSA campaign: '+(x.NHTSACampaignNumber||'Not listed')),line('p','Summary: '+(x.Summary||'Not available')),line('p','Remedy: '+(x.Remedy||'Contact manufacturer')));$('#list').append(a)});
-$('#results').hidden=false;$('#status').textContent='Lookup completed.';
+$('#results').hidden=false;if(!$('#status').textContent.startsWith('Newly listed'))$('#status').textContent='Lookup completed.';
 }catch(err){$('#status').className='error';$('#status').textContent=err.message+' Please try the official NHTSA checker.'}
 finally{$('#go').disabled=false}
 });
