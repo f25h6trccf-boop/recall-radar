@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recall Radar — Vehicle Safety Recalls</title>
+<style>
+:root{font-family:system-ui,sans-serif;background:#091526;color:#eaf4ff}*{box-sizing:border-box}body{margin:0}header,main,footer{max-width:860px;margin:auto;padding:24px}header{display:flex;justify-content:space-between;gap:15px;align-items:center}a{color:#79d8ff}.brand{font-weight:800;color:#79d8ff}main{padding-top:55px}h1{font-size:clamp(2rem,6vw,3.7rem);line-height:1.1;margin-bottom:10px}p{color:#b8c9db;line-height:1.55}.panel{background:#14263d;border:1px solid #36506a;border-radius:18px;padding:24px;margin-top:25px}label{display:block;font-weight:700;margin-bottom:10px}input{width:100%;background:#071322;color:white;border:1px solid #56708c;border-radius:9px;padding:15px;font-size:18px;text-transform:uppercase}button{margin-top:15px;padding:13px 24px;border:0;border-radius:9px;background:#62d2ff;color:#04101e;font-weight:800;cursor:pointer}button:disabled{opacity:.6}.small{font-size:13px}.error{color:#ffb3b3}.recall{border-top:1px solid #36506a;padding-top:15px;margin-top:15px;white-space:normal}footer{font-size:13px}#results[hidden]{display:none}
+</style></head><body>
+<header><div class="brand">◉ RECALL RADAR</div><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Official NHTSA checker</a></header>
+<main><h1>Know your vehicle.<br>Know the recalls.</h1><p>Enter a VIN to identify your vehicle and explore model-level safety recall campaigns reported by the U.S. government. Free, no account required.</p>
+<section class="panel"><form id="form"><label for="vin">17-character vehicle identification number</label><input id="vin" minlength="17" maxlength="17" required autocomplete="off" spellcheck="false" placeholder="Enter VIN"><button id="go">Search recalls</button></form><p class="small">VINs are submitted directly from your browser to NHTSA's VIN decoder. This site does not operate a VIN database.</p><p id="status" role="status" aria-live="polite"></p></section>
+<section class="panel" id="results" hidden><h2 id="vehicle"></h2><p id="summary"></p><div id="list"></div><p><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Check VIN-specific open recall status on NHTSA.gov</a></p><p class="small">Model-level recall campaigns do not establish that your individual VIN has an open recall. Check VIN-specific status with NHTSA or the manufacturer.</p></section></main>
+<footer>Independent educational website, not affiliated with NHTSA. Data: <a href="https://www.nhtsa.gov/nhtsa-datasets-and-apis">NHTSA APIs</a>. Always verify safety information with official sources.</footer>
+<script>
+const $=s=>document.querySelector(s);
+const line=(tag,text)=>{const e=document.createElement(tag);e.textContent=text||'';return e};
+async function get(url){const r=await fetch(url);if(!r.ok)throw Error('Government data service unavailable ('+r.status+')');return r.json()}
+$('#form').addEventListener('submit',async e=>{
+e.preventDefault();$('#results').hidden=true;$('#status').className='';
+const vin=$('#vin').value.trim().toUpperCase();
+if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)){$('#status').textContent='Enter a 17-character VIN without I, O, or Q.';$('#status').className='error';return}
+$('#go').disabled=true;$('#status').textContent='Decoding VIN…';
+try{
+const d=await get('https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/'+encodeURIComponent(vin)+'?format=json');
+const v=d.Results?.[0];
+if(!v||!v.Make||!v.Model||!/^\d{4}$/.test(v.ModelYear)||!String(v.ErrorCode||'').split(',').map(x=>x.trim()).includes('0'))throw Error('Could not reliably decode this VIN.');
+$('#vehicle').textContent=v.ModelYear+' '+v.Make+' '+v.Model;
+$('#status').textContent='Checking recall campaigns…';
+const r=await get('https://api.nhtsa.gov/recalls/recallsByVehicle?make='+encodeURIComponent(v.Make)+'&model='+encodeURIComponent(v.Model)+'&modelYear='+encodeURIComponent(v.ModelYear));
+const rows=Array.isArray(r.results)?r.results:[];
+$('#summary').textContent=rows.length?rows.length+' model-level recall campaign record(s) found. These are NOT confirmed open recalls for this VIN.':'No model-level campaigns returned. This does not prove the vehicle has no recalls.';
+$('#list').replaceChildren();
+rows.forEach(x=>{const a=line('article');a.className='recall';a.append(line('h3',x.Component||'Recall campaign'),line('p','NHTSA campaign: '+(x.NHTSACampaignNumber||'Not listed')),line('p','Summary: '+(x.Summary||'Not available')),line('p','Remedy: '+(x.Remedy||'Contact manufacturer')));$('#list').append(a)});
+$('#results').hidden=false;$('#status').textContent='Lookup completed.';
+}catch(err){$('#status').className='error';$('#status').textContent=err.message+' Please try the official NHTSA checker.'}
+finally{$('#go').disabled=false}
+});
+</script></body></html>
