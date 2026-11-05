@@ -7,14 +7,36 @@
 <header><div class="brand">◉ RECALL RADAR</div><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Official NHTSA checker</a></header>
 <main><h1>Know your vehicle.<br>Know the recalls.</h1><p>Enter a VIN to identify your vehicle and explore model-level safety recall campaigns reported by the U.S. government. Free, no account required.</p>
 <section class="panel"><form id="form"><label for="vin">17-character vehicle identification number</label><input id="vin" minlength="17" maxlength="17" required autocomplete="off" spellcheck="false" placeholder="Enter VIN"><button id="go">Search recalls</button></form><p class="small">VINs are submitted directly from your browser to NHTSA's VIN decoder. This site does not operate a VIN database.</p><p id="status" role="status" aria-live="polite"></p></section>
-<section class="panel" id="results" hidden><h2 id="vehicle"></h2><p id="summary"></p><div id="list"></div><p><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Check VIN-specific open recall status on NHTSA.gov</a></p><p class="small">Model-level recall campaigns do not establish that your individual VIN has an open recall. Check VIN-specific status with NHTSA or the manufacturer.</p></section></main>
+<section class="panel"><h2>My Garage</h2><p class="small">Saved VINs stay only in this browser. Anyone with access to this device may view them. Clear browser data to remove them.</p><button type="button" id="save" disabled>Save current vehicle</button><div id="garage"></div></section><section class="panel" id="results" hidden><h2 id="vehicle"></h2><p id="summary"></p><div id="list"></div><p><a href="https://www.nhtsa.gov/recalls" target="_blank" rel="noopener">Check VIN-specific open recall status on NHTSA.gov</a></p><p class="small">Model-level recall campaigns do not establish that your individual VIN has an open recall. Check VIN-specific status with NHTSA or the manufacturer.</p></section></main>
 <footer>Independent educational website, not affiliated with NHTSA. Data: <a href="https://www.nhtsa.gov/nhtsa-datasets-and-apis">NHTSA APIs</a>. Always verify safety information with official sources.</footer>
 <script>
 const $=s=>document.querySelector(s);
+const garageKey='recall-radar-garage-v1';
+let currentVehicle=null;
+function readGarage(){try{const x=JSON.parse(localStorage.getItem(garageKey)||'[]');return Array.isArray(x)?x.filter(v=>typeof v.vin==='string'&&/^[A-HJ-NPR-Z0-9]{17}$/.test(v.vin)).slice(0,20):[]}catch{return []}}
+function renderGarage(){
+ const el=$('#garage');el.replaceChildren();
+ const saved=readGarage();
+ if(!saved.length){el.append(line('p','No saved vehicles yet.'));return}
+ saved.forEach(v=>{
+ const row=line('div');row.className='recall';
+ row.append(line('strong',v.label+' — '+v.vin.slice(0,3)+'••••••••'+v.vin.slice(-6)));
+ const check=line('button','Check');check.type='button';check.style.marginRight='8px';
+ check.addEventListener('click',()=>{$('#vin').value=v.vin;$('#form').requestSubmit()});
+ const remove=line('button','Remove');remove.type='button';remove.addEventListener('click',()=>{localStorage.setItem(garageKey,JSON.stringify(readGarage().filter(x=>x.vin!==v.vin)));renderGarage()});
+ row.append(line('div'));row.lastChild.append(check,remove);el.append(row);
+ })
+}
+$('#save').addEventListener('click',()=>{
+ if(!currentVehicle)return;
+ const saved=readGarage();if(!saved.some(v=>v.vin===currentVehicle.vin)){saved.push(currentVehicle);localStorage.setItem(garageKey,JSON.stringify(saved.slice(-20)))}
+ renderGarage();
+});
+renderGarage();
 const line=(tag,text)=>{const e=document.createElement(tag);e.textContent=text||'';return e};
 async function get(url){const r=await fetch(url);if(!r.ok)throw Error('Government data service unavailable ('+r.status+')');return r.json()}
 $('#form').addEventListener('submit',async e=>{
-e.preventDefault();$('#results').hidden=true;$('#status').className='';
+e.preventDefault();$('#results').hidden=true;$('#status').className='';currentVehicle=null;$('#save').disabled=true;
 const vin=$('#vin').value.trim().toUpperCase();
 if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)){$('#status').textContent='Enter a 17-character VIN without I, O, or Q.';$('#status').className='error';return}
 $('#go').disabled=true;$('#status').textContent='Decoding VIN…';
@@ -22,7 +44,7 @@ try{
 const d=await get('https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/'+encodeURIComponent(vin)+'?format=json');
 const v=d.Results?.[0];
 if(!v||!v.Make||!v.Model||!/^\d{4}$/.test(v.ModelYear)||!String(v.ErrorCode||'').split(',').map(x=>x.trim()).includes('0'))throw Error('Could not reliably decode this VIN.');
-$('#vehicle').textContent=v.ModelYear+' '+v.Make+' '+v.Model;
+$('#vehicle').textContent=v.ModelYear+' '+v.Make+' '+v.Model;currentVehicle={vin,label:v.ModelYear+' '+v.Make+' '+v.Model};$('#save').disabled=false;
 $('#status').textContent='Checking recall campaigns…';
 const r=await get('https://api.nhtsa.gov/recalls/recallsByVehicle?make='+encodeURIComponent(v.Make)+'&model='+encodeURIComponent(v.Model)+'&modelYear='+encodeURIComponent(v.ModelYear));
 const rows=Array.isArray(r.results)?r.results:[];
